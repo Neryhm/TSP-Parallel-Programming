@@ -1,0 +1,6 @@
+*.exe
+*.o
+*.out
+*.bin
+BnB/main
+OpenMP/main
