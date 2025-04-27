@@ -4,3 +4,4 @@
 *.bin
 BnB/main
 OpenMP/main
+.vscode/
