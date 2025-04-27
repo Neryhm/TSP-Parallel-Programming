@@ -2,6 +2,6 @@
 *.o
 *.out
 *.bin
-BnB/main
-OpenMP/main
+Sequential/TSP_Sequential
+OpenMP/TSP_Omp
 .vscode/
