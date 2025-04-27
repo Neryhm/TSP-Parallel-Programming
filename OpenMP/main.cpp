@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstring>
-#include <omp.h>
+#include <omp.h>  // Include OpenMP header
 
 class Node {
 public:
@@ -40,7 +40,7 @@ private:
     int** originalMatrix;
     int bestCost;
     std::vector<int> bestPath;
-    std::ofstream logFile;
+    std::ofstream logFile; // Log file stream
 
     struct CompareNode {
         bool operator()(const Node* a, const Node* b) {
@@ -50,6 +50,7 @@ private:
 
     std::priority_queue<Node*, std::vector<Node*>, CompareNode> pq;
 
+    // Calculate MST cost for unvisited cities using Prim's algorithm
     int calculateMST(int** matrix, int size, const std::vector<int>& visited) {
         std::vector<bool> inMST(size, false);
         std::vector<int> key(size, INT_MAX);
@@ -95,6 +96,7 @@ private:
     int reduceMatrix(int** matrix, int size, const std::vector<int>& path) {
         int reduction = 0;
 
+        #pragma omp parallel for num_threads(4) reduction(+:reduction) schedule(static)
         for (int i = 0; i < size; ++i) {
             int minVal = INT_MAX;
             for (int j = 0; j < size; ++j) {
@@ -112,6 +114,7 @@ private:
             }
         }
 
+        #pragma omp parallel for num_threads(4) reduction(+:reduction) schedule(static)
         for (int j = 0; j < size; ++j) {
             int minVal = INT_MAX;
             for (int i = 0; i < size; ++i) {
@@ -178,8 +181,8 @@ private:
     }
 
 public:
-    TSPBranchAndBound(int** matrix, int size, bool parallel = false) : n(size), bestCost(INT_MAX) {
-        logFile.open(parallel ? "tsp_log_parallel.txt" : "tsp_log_sequential.txt");
+    TSPBranchAndBound(int** matrix, int size) : n(size), bestCost(INT_MAX) {
+        logFile.open("tsp_log.txt");
         if (!logFile.is_open()) {
             std::cerr << "Error opening log file!" << std::endl;
         }
@@ -199,125 +202,104 @@ public:
         logFile.close();
     }
 
-    void solve(bool parallel = false) {
-        while (!pq.empty()) {
-            Node* current = pq.top();
-            pq.pop();
+    void solve() {
+        #pragma omp parallel num_threads(4)
+        {
+            #pragma omp single
+            {
+                while (!pq.empty()) {
+                    Node* current = pq.top();
+                    pq.pop();
 
-            if (current->lowerBound >= bestCost) {
-                delete current;
-                continue;
-            }
-
-            if (current->level == n - 1) {
-                int finalCost = current->cost + originalMatrix[current->path.back()][0];
-                #pragma omp critical
-                {
-                    if (finalCost < bestCost) {
-                        bestCost = finalCost;
-                        bestPath = current->path;
-                        bestPath.push_back(0);
-                        std::cout << "New best path (Thread " << omp_get_thread_num() << "): ";
-                        logFile << "New best path (Thread " << omp_get_thread_num() << "): ";
-                        for (int city : bestPath) {
-                            std::cout << city << " ";
-                            logFile << city << " ";
-                        }
-                        std::cout << "| Cost: " << bestCost << std::endl;
-                        logFile << "| Cost: " << bestCost << std::endl;
+                    if (current->lowerBound >= bestCost) {
+                        delete current;
+                        continue;
                     }
-                }
-                delete current;
-                continue;
-            }
 
-            if (parallel) {
-                #pragma omp parallel for
-                for (int nextCity = 0; nextCity < n; ++nextCity) {
-                    if (std::find(current->path.begin(), current->path.end(), nextCity) == current->path.end()) {
-                        int** childMatrix = createNewMatrix(current->path.back(), nextCity, current->reducedMatrix);
-                        int edgeCost = originalMatrix[current->path.back()][nextCity];
-                        int newCost = current->cost + edgeCost;
-
-                        std::vector<int> newPath = current->path;
-                        newPath.push_back(nextCity);
-
-                        int reduction = reduceMatrix(childMatrix, n, newPath);
-                        int newBound = newCost + reduction;
-
-                        if (newBound < bestCost) {
-                            Node* child = new Node(current->level + 1, newPath, childMatrix, newCost, newBound, n);
+                    if (current->level == n - 1) {
+                        int finalCost = current->cost + originalMatrix[current->path.back()][0];
+                        if (finalCost < bestCost) {
                             #pragma omp critical
                             {
-                                pq.push(child);
-                                std::cout << "Path (Thread " << omp_get_thread_num() << "): ";
-                                logFile << "Path (Thread " << omp_get_thread_num() << "): ";
-                                for (int city : newPath) {
-                                    std::cout << city << " ";
-                                    logFile << city << " ";
+                                if (finalCost < bestCost) { // Double check in case another thread updated
+                                    bestCost = finalCost;
+                                    bestPath = current->path;
+                                    bestPath.push_back(0);
+                                    std::cout << "New best path: ";
+                                    logFile << "New best path: ";
+                                    for (int city : bestPath) {
+                                        std::cout << city << " ";
+                                        logFile << city << " ";
+                                    }
+                                    std::cout << "| Cost: " << bestCost << std::endl;
+                                    logFile << "| Cost: " << bestCost << std::endl;
                                 }
-                                std::cout << "| Lower Bound: " << newBound << std::endl;
-                                logFile << "| Lower Bound: " << newBound << std::endl;
                             }
-                        } else {
-                            for (int i = 0; i < n; ++i) {
-                                delete[] childMatrix[i];
+                        }
+                        delete current;
+                        continue;
+                    }
+
+                    std::vector<Node*> childNodes;
+                    
+                    int nextCity; // Declare nextCity before using it in private clause
+                    #pragma omp taskloop shared(childNodes) private(nextCity)
+                    for (int nextCity = 0; nextCity < n; ++nextCity) {
+                        if (std::find(current->path.begin(), current->path.end(), nextCity) == current->path.end()) {
+                            int** childMatrix = createNewMatrix(current->path.back(), nextCity, current->reducedMatrix);
+                            int edgeCost = originalMatrix[current->path.back()][nextCity];
+                            int newCost = current->cost + edgeCost;
+
+                            std::vector<int> newPath = current->path;
+                            newPath.push_back(nextCity);
+
+                            int reduction = reduceMatrix(childMatrix, n, newPath);
+                            int newBound = newCost + reduction;
+
+                            if (newBound < bestCost) {
+                                Node* child = new Node(current->level + 1, newPath, childMatrix, newCost, newBound, n);
+                                
+                                #pragma omp critical
+                                {
+                                    pq.push(child);
+                                
+                                    std::cout << "Path: ";
+                                    logFile << "Path: ";
+                                    for (int city : newPath) {
+                                        std::cout << city << " ";
+                                        logFile << city << " ";
+                                    }
+                                    std::cout << "| Lower Bound: " << newBound << std::endl;
+                                    logFile << "| Lower Bound: " << newBound << std::endl;
+                                }
+                            } else {
+                                for (int i = 0; i < n; ++i) {
+                                    delete[] childMatrix[i];
+                                }
+                                delete[] childMatrix;
                             }
-                            delete[] childMatrix;
                         }
                     }
-                }
-            } else {
-                for (int nextCity = 0; nextCity < n; ++nextCity) {
-                    if (std::find(current->path.begin(), current->path.end(), nextCity) == current->path.end()) {
-                        int** childMatrix = createNewMatrix(current->path.back(), nextCity, current->reducedMatrix);
-                        int edgeCost = originalMatrix[current->path.back()][nextCity];
-                        int newCost = current->cost + edgeCost;
-
-                        std::vector<int> newPath = current->path;
-                        newPath.push_back(nextCity);
-
-                        int reduction = reduceMatrix(childMatrix, n, newPath);
-                        int newBound = newCost + reduction;
-
-                        if (newBound < bestCost) {
-                            Node* child = new Node(current->level + 1, newPath, childMatrix, newCost, newBound, n);
-                            pq.push(child);
-                            std::cout << "Path: ";
-                            logFile << "Path: ";
-                            for (int city : newPath) {
-                                std::cout << city << " ";
-                                logFile << city << " ";
-                            }
-                            std::cout << "| Lower Bound: " << newBound << std::endl;
-                            logFile << "| Lower Bound: " << newBound << std::endl;
-                        } else {
-                            for (int i = 0; i < n; ++i) {
-                                delete[] childMatrix[i];
-                            }
-                            delete[] childMatrix;
-                        }
-                    }
+                    delete current;
                 }
             }
-            delete current;
         }
     }
 
     int getBestCost() const { return bestCost; }
     const std::vector<int>& getBestPath() const { return bestPath; }
 
-    void logFinalOutput(double duration, bool parallel) {
-        std::cout << "\nOptimal Path (" << (parallel ? "Parallel" : "Sequential") << "): ";
-        logFile << "\nOptimal Path (" << (parallel ? "Parallel" : "Sequential") << "): ";
+    void logFinalOutput(double duration) {
+        std::cout << "\nOptimal Path: ";
+        logFile << "\nOptimal Path: ";
         for (int city : getBestPath()) {
             std::cout << city << " ";
             logFile << city << " ";
         }
         std::cout << "\nTotal Cost: " << getBestCost() << std::endl;
         logFile << "\nTotal Cost: " << getBestCost() << std::endl;
-        std::cout << "Runtime (" << (parallel ? "Parallel" : "Sequential") << "): " << duration << " seconds" << std::endl;
-        logFile << "Runtime (" << (parallel ? "Parallel" : "Sequential") << "): " << duration << " seconds" << std::endl;
+        std::cout << "Runtime: " << duration << " seconds" << std::endl;
+        logFile << "Runtime: " << duration << " seconds" << std::endl;
     }
 };
 
@@ -344,23 +326,13 @@ int main() {
         }
     }
 
-    // Sequential Run
-    std::cout << "Running Sequential TSP...\n";
-    TSPBranchAndBound tspSequential(dynamicMatrix, n, false);
-    double start = omp_get_wtime();
-    tspSequential.solve(false);
-    double sequentialTime = omp_get_wtime() - start;
-    tspSequential.logFinalOutput(sequentialTime, false);
+    TSPBranchAndBound tsp(dynamicMatrix, n);
+    std::clock_t start = std::clock();
+    tsp.solve();
+    double duration = (std::clock() - start) / (double)CLOCKS_PER_SEC;
 
-    // Parallel Run
-    std::cout << "\nRunning Parallel TSP...\n";
-    TSPBranchAndBound tspParallel(dynamicMatrix, n, true);
-    start = omp_get_wtime();
-    tspParallel.solve(true);
-    double parallelTime = omp_get_wtime() - start;
-    tspParallel.logFinalOutput(parallelTime, true);
+    tsp.logFinalOutput(duration);
 
-    // Cleanup
     for (int i = 0; i < n; ++i) {
         delete[] dynamicMatrix[i];
     }
@@ -368,4 +340,3 @@ int main() {
 
     return 0;
 }
-// g++ -fopenmp OpenMP/main.cpp -o OpenMP/main
