@@ -1,0 +1,8 @@
+*.exe
+*.o
+*.out
+*.bin
+Sequential/TSP_Sequential
+OpenMP/TSP_Omp
+CUDA/TSP_Cuda
+.vscode/
