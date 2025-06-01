@@ -4,7 +4,7 @@
 *.bin
 Sequential/TSP_Sequential
 OpenMP/TSP_Omp
-CUDA/TSP_Cuda
+CUDA/TSP_CUDA
 .vscode/
 tsp_log_openmp.txt
 tsp_log_sequential.txt
