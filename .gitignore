@@ -6,3 +6,5 @@ Sequential/TSP_Sequential
 OpenMP/TSP_Omp
 CUDA/TSP_Cuda
 .vscode/
+tsp_log_openmp.txt
+tsp_log_sequential.txt
