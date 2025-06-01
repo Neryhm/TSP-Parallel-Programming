@@ -1,0 +1,5 @@
+Processors,Time_OpenMP,Speedup_OpenMP,Time_CUDA,Speedup_CUDA
+1,
+2,
+4,
+8,

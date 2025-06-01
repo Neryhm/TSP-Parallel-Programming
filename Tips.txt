@@ -1,0 +1,51 @@
+So Sánh Song Song Hóa CUDA với Tuần Tự
+Về cơ bản, thuật toán Nhánh và Cận (Branch and Bound - B&B) cho TSP hoạt động bằng cách xây dựng một cây tìm kiếm các giải pháp (đường đi) tiềm năng.
+
+Phiên bản tuần tự:
+
+Xử lý từng nút một trong cây tìm kiếm.
+Lấy một nút từ hàng đợi ưu tiên.
+Thực hiện tất cả các bước cho nút đó: rút gọn ma trận, tính toán chi phí, tạo các nút con, thêm nút con vào hàng đợi.
+Tất cả diễn ra trên một luồng CPU duy nhất.
+Phiên bản CUDA (trong mã bạn đang có - một dạng hybrid):
+
+CPU (Host) vẫn giữ vai trò quản lý chính:
+Quản lý hàng đợi ưu tiên toàn cục (pq_host).
+Quyết định min_cost_host cuối cùng và final_path_host.
+GPU (Device) thực hiện xử lý song song theo lô (batch):
+Thay vì CPU xử lý từng nút, CPU sẽ gom một lô các nút (ví dụ BATCH_SIZE = 256 nút) có chi phí hứa hẹn nhất từ hàng đợi của nó.
+Lô nút này được gửi lên GPU.
+Đây là điểm song song hóa chính: Hàng trăm hoặc hàng ngàn luồng GPU sẽ được khởi chạy để xử lý đồng thời nhiều nút trong lô đó.
+Phân Chia Luồng và Các Công Đoạn Được Song Song Hóa trên GPU
+Khởi Chạy Kernel (processNodes_kernel):
+
+Khi CPU gọi hàm kernel processNodes_kernel<<<blocks_per_grid, threads_per_block>>>(...), một lưới (grid) các khối (block) luồng được tạo ra trên GPU. Mỗi khối lại chứa nhiều luồng (thread).
+Ví dụ: Nếu current_batch_fill_size (số nút trong lô) là 256 và threads_per_block là 256, bạn sẽ khởi chạy 1 block với 256 luồng. Nếu current_batch_fill_size là 512, bạn sẽ khởi chạy 2 block, mỗi block 256 luồng.
+Mỗi Luồng GPU Xử Lý một Nút (trong lô):
+
+Bên trong kernel, mỗi luồng GPU sẽ lấy một ID duy nhất (idx = blockIdx.x * blockDim.x + threadIdx.x).
+Nếu idx nhỏ hơn số nút thực tế trong lô (num_nodes_in_batch), luồng đó sẽ chịu trách nhiệm xử lý một nút d_input_nodes[idx] từ lô đầu vào.
+Công đoạn song song hóa: Tất cả các luồng này thực hiện các bước sau đồng thời cho các nút khác nhau mà chúng được gán:
+Kiểm tra cắt tỉa (Pruning): So sánh current_node.cost với current_min_cost_host.
+Kiểm tra hoàn thành (Leaf Node for CPU): Nếu current_node.level == n_val - 1, nút này được coi là một "ứng viên lá" và được sao chép vào mảng output d_output_children để CPU xử lý tiếp (hoàn thành tour, cập nhật min_cost_host).
+Tạo Nút Con (Branching): Đây là phần tính toán nặng nhất được song song hóa:
+Lặp qua các thành phố kế tiếp tiềm năng (next_city).
+Sao chép ma trận của nút cha (current_node.reduced_matrix) sang ma trận của nút con (child_node.reduced_matrix). Lưu ý: Trong mã hiện tại, mỗi Node chứa toàn bộ bản sao ma trận, nên đây là phép sao chép bộ nhớ.
+Cập nhật ma trận của nút con (đặt các hàng/cột thành INF).
+Gọi hàm __device__ reduceMatrix_device(child_node.reduced_matrix, n_val) để rút gọn ma trận của nút con và lấy chi phí rút gọn. Mỗi luồng gọi hàm này cho ma trận con của riêng nó.
+Tính toán chi phí (child_node.cost) cho nút con.
+Nếu nút con hứa hẹn (chi phí thấp hơn current_min_cost_host), nó được thêm vào mảng d_output_children.
+Ghi Kết Quả Song Song (Có Điều Phối):
+
+Khi nhiều luồng cùng muốn ghi các nút con mới tạo vào mảng d_output_children, chúng sử dụng atomicAdd(d_children_count, 1). Hàm này đảm bảo rằng mỗi luồng sẽ nhận được một chỉ số (output_idx) duy nhất trong mảng output, tránh việc ghi đè lên nhau.
+Các Công Cụ và Khái Niệm CUDA Được Sử Dụng
+__global__ functions (Kernel): processNodes_kernel là một kernel. Đây là hàm được gọi từ CPU (host) nhưng thực thi trên GPU (device) bởi rất nhiều luồng.
+__device__ functions: reduceMatrix_device là một hàm device. Nó được gọi từ bên trong kernel (hoặc từ các hàm __device__ khác) và cũng thực thi trên GPU.
+Cấu hình khởi chạy Kernel (<<<...>>>): <<<blocks_per_grid, threads_per_block>>> xác định số lượng khối luồng và số luồng trong mỗi khối sẽ được GPU sử dụng để thực thi kernel.
+Biến định danh luồng: threadIdx, blockIdx, blockDim giúp mỗi luồng biết mình là ai và cần xử lý phần dữ liệu nào.
+Quản lý bộ nhớ GPU:
+cudaMalloc(): Cấp phát bộ nhớ trên GPU.
+cudaMemcpy(): Sao chép dữ liệu giữa bộ nhớ CPU (host) và bộ nhớ GPU (device).
+cudaFree(): Giải phóng bộ nhớ GPU.
+atomicAdd(): Một phép toán nguyên tử, đảm bảo rằng việc đọc-sửa-ghi một biến (ở đây là d_children_count) được thực hiện một cách trọn vẹn mà không bị các luồng khác xen ngang.
+cudaDeviceSynchronize(): Buộc CPU phải đợi cho đến khi tất cả các tác vụ GPU đã được khởi chạy trước đó (bao gồm cả kernel) hoàn thành

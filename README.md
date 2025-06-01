@@ -1,5 +1,6 @@
 For Sequential: g++ -fopenmp Sequential/TSP_Sequential.cpp -o Sequential/TSP_Sequential
 For OpenMP: g++ -fopenmp OpenMP/TSP_Omp.cpp -o OpenMP/TSP_Omp
+For CUDA: nvcc CUDA/TSP_CUDA.cu -o CUDA/TSP_CUDA -arch=sm_86
 
 Parallelizing Step-by-step plan:
 1. Include OpenMP Header: Add the <omp.h> header file.

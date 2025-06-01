@@ -275,7 +275,7 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
     // printMatrix_host(root_host_node.reduced_matrix, N_actual, "Initial Root Matrix");
 
 
-    const int BATCH_SIZE = 256;
+    const int BATCH_SIZE = 1024;
     std::vector<Node> batch_nodes_host(BATCH_SIZE);
     std::vector<Node> children_nodes_from_gpu_host;
 

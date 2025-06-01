@@ -27,10 +27,10 @@ Initial Root Node Cost (Host): 222
 ========================================
            Final Result (CUDA)
 ========================================
-Nodes processed on GPU (approx): 96276
+Nodes processed on GPU (approx): 99690
 Minimum Cost: 237
 Optimal Path: 0 -> 7 -> 17 -> 10 -> 4 -> 15 -> 12 -> 3 -> 9 -> 19 -> 6 -> 1 -> 14 -> 18 -> 2 -> 13 -> 5 -> 11 -> 8 -> 16 -> 0
 ========================================
            Performance
 ========================================
-Total Runtime: 7127 ms
+Total Runtime: 5414 ms
