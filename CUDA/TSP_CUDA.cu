@@ -15,7 +15,7 @@
 // Constants and Global (Host) Variables
 // ==================================================================================
 const int INF = std::numeric_limits<int>::max();
-const int MAX_CITIES = 20; // Giới hạn số thành phố, điều chỉnh nếu cần
+const int MAX_CITIES = 20;
 
 int N_actual; // Số thành phố thực tế của bài toán
 std::ofstream log_file_cuda;
@@ -35,19 +35,17 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 // Data Structures
 // ==================================================================================
 struct Node {
-    int reduced_matrix[MAX_CITIES * MAX_CITIES]; // Ma trận rút gọn (mảng 1D, stride MAX_CITIES)
+    int reduced_matrix[MAX_CITIES * MAX_CITIES];
     int path[MAX_CITIES];
     int cost;
     int level;
     int city_id;
 
-    // Hàm khởi tạo cho cả host và device
     __host__ __device__ Node() : cost(0), level(0), city_id(0) {
         for(int i=0; i < MAX_CITIES; ++i) path[i] = -1;
-        for(int i=0; i < MAX_CITIES * MAX_CITIES; ++i) reduced_matrix[i] = INF; // Khởi tạo ma trận bằng INF
+        for(int i=0; i < MAX_CITIES * MAX_CITIES; ++i) reduced_matrix[i] = INF;
     }
 
-    // Để sử dụng với std::priority_queue trên host
     bool operator>(const Node& other) const {
         return cost > other.cost;
     }
@@ -58,16 +56,15 @@ struct Node {
 // Device Code (__device__ functions)
 // ==================================================================================
 
-// Hàm rút gọn ma trận trên device
-__device__ int reduceMatrix_device(int* matrix, int n_val) { // n_val là N_actual
+__device__ int reduceMatrix_device(int* matrix, int n_val) {
     int reduction_cost = 0;
-    const int stride = MAX_CITIES; // LUÔN dùng MAX_CITIES làm stride
+    const int stride = MAX_CITIES;
 
     // Row reduction
-    for (int i = 0; i < n_val; ++i) { // Lặp qua N_actual hàng
+    for (int i = 0; i < n_val; ++i) {
         int min_val_row = INF;
-        for (int j = 0; j < n_val; ++j) { // Lặp qua N_actual cột
-            if (matrix[i * stride + j] < min_val_row) { // Dùng stride
+        for (int j = 0; j < n_val; ++j) {
+            if (matrix[i * stride + j] < min_val_row) {
                 min_val_row = matrix[i * stride + j];
             }
         }
@@ -82,10 +79,10 @@ __device__ int reduceMatrix_device(int* matrix, int n_val) { // n_val là N_actu
     }
 
     // Column reduction
-    for (int j = 0; j < n_val; ++j) { // Lặp qua N_actual cột
+    for (int j = 0; j < n_val; ++j) {
         int min_val_col = INF;
-        for (int i = 0; i < n_val; ++i) { // Lặp qua N_actual hàng
-            if (matrix[i * stride + j] < min_val_col) { // Dùng stride
+        for (int i = 0; i < n_val; ++i) {
+            if (matrix[i * stride + j] < min_val_col) {
                 min_val_col = matrix[i * stride + j];
             }
         }
@@ -113,10 +110,10 @@ __global__ void processNodes_kernel(Node* d_input_nodes,
                                    int max_children_per_node)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    const int stride = MAX_CITIES; // Sử dụng MAX_CITIES làm stride
+    const int stride = MAX_CITIES;
 
     if (idx < num_nodes_in_batch) {
-        Node current_node = d_input_nodes[idx]; // Lấy một bản sao để làm việc
+        Node current_node = d_input_nodes[idx];
 
         if (current_node.cost >= current_min_cost_host) {
             return;
@@ -140,15 +137,13 @@ __global__ void processNodes_kernel(Node* d_input_nodes,
             }
 
             if (current_node.reduced_matrix[current_node.city_id * stride + next_city] != INF && !visited) {
-                Node child_node; // Gọi hàm khởi tạo __device__ Node() -> ma trận được init bằng INF
+                Node child_node;
 
-                // Sao chép phần N_actual x N_actual của ma trận cha
                 for (int r = 0; r < n_val; ++r) {
                     for (int c = 0; c < n_val; ++c) {
                         child_node.reduced_matrix[r * stride + c] = current_node.reduced_matrix[r * stride + c];
                     }
                 }
-                // Phần padding của child_node.reduced_matrix (nếu n_val < MAX_CITIES) đã được init là INF bởi constructor.
 
                 for(int i=0; i <= current_node.level; ++i) child_node.path[i] = current_node.path[i];
 
@@ -158,15 +153,13 @@ __global__ void processNodes_kernel(Node* d_input_nodes,
 
                 int edge_cost_in_parent_matrix = current_node.reduced_matrix[current_node.city_id * stride + next_city];
 
-                // Đặt các hàng/cột thành INF trong ma trận con, dùng stride
-                // Chỉ cần thao tác trên phần N_actual x N_actual của ma trận con
                 for (int k = 0; k < n_val; ++k) {
-                    child_node.reduced_matrix[current_node.city_id * stride + k] = INF; // Hàng của thành phố hiện tại
-                    child_node.reduced_matrix[k * stride + next_city] = INF;           // Cột của thành phố kế tiếp
+                    child_node.reduced_matrix[current_node.city_id * stride + k] = INF;
+                    child_node.reduced_matrix[k * stride + next_city] = INF;
                 }
 
-                if (child_node.path[0] != -1) { // path[0] là thành phố bắt đầu của tour
-                   child_node.reduced_matrix[next_city * stride + child_node.path[0]] = INF; // Ngăn quay lại ngay TP bắt đầu tour
+                if (child_node.path[0] != -1) {
+                   child_node.reduced_matrix[next_city * stride + child_node.path[0]] = INF;
                 }
 
 
@@ -193,7 +186,7 @@ void printMatrix_host(const int* matrix_flat, int n_val_to_print, const std::str
     log_file_cuda << title << " (Printing " << n_val_to_print << "x" << n_val_to_print << " view, Stored Stride=" << MAX_CITIES << "):\n";
     for (int i = 0; i < n_val_to_print; ++i) {
         for (int j = 0; j < n_val_to_print; ++j) {
-            if (matrix_flat[i * MAX_CITIES + j] == INF) { // Dùng MAX_CITIES làm stride
+            if (matrix_flat[i * MAX_CITIES + j] == INF) {
                 log_file_cuda << std::setw(5) << "INF";
             } else {
                 log_file_cuda << std::setw(5) << matrix_flat[i * MAX_CITIES + j];
@@ -249,11 +242,11 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
 
     int min_cost_host = INF;
     std::vector<int> final_path_host(N_actual + 1);
-    long long nodes_processed_on_gpu_count = 0; // Đếm số nút thực sự được gửi lên GPU và xử lý
+    long long nodes_processed_on_gpu_count = 0;
 
     std::priority_queue<Node, std::vector<Node>, std::greater<Node>> pq_host;
 
-    Node root_host_node; // Constructor sẽ khởi tạo ma trận bằng INF
+    Node root_host_node;
     root_host_node.level = 0;
     root_host_node.city_id = 0;
     root_host_node.path[0] = 0;
@@ -261,14 +254,11 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
     std::vector<std::vector<int>> temp_matrix_for_reduction = initial_matrix_vec;
     root_host_node.cost = reduceMatrix_host_vec(temp_matrix_for_reduction, N_actual);
 
-    // Sao chép phần N_actual x N_actual từ temp_matrix_for_reduction
-    // vào root_host_node.reduced_matrix sử dụng MAX_CITIES làm stride
     for(int i=0; i < N_actual; ++i) {
         for(int j=0; j < N_actual; ++j) {
             root_host_node.reduced_matrix[i * MAX_CITIES + j] = temp_matrix_for_reduction[i][j];
         }
     }
-    // Phần padding của root_host_node.reduced_matrix đã được init là INF bởi constructor.
 
     pq_host.push(root_host_node);
     log_file_cuda << "Initial Root Node Cost (Host): " << root_host_node.cost << std::endl;
@@ -298,7 +288,7 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
             pq_host.pop();
 
             if (top_node.cost >= min_cost_host) {
-                i--; // Không tính nút này, thử lấy nút khác
+                i--;
                 continue;
             }
             batch_nodes_host[i] = top_node;
@@ -335,7 +325,6 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
         cudaErrCheck(cudaMemcpy(&h_children_count_from_gpu, d_children_count, sizeof(int), cudaMemcpyDeviceToHost));
 
         if (h_children_count_from_gpu > 0) {
-            // Đảm bảo children_nodes_from_gpu_host đủ lớn
             if (children_nodes_from_gpu_host.size() < (size_t)h_children_count_from_gpu) {
                  children_nodes_from_gpu_host.resize(h_children_count_from_gpu);
             }
@@ -347,7 +336,7 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
 
                 if (child.level == N_actual - 1) {
                     int actual_tour_cost = child.cost;
-                    if (initial_matrix_vec[child.city_id][child.path[0]] != INF) { // Kiểm tra cạnh cuối có tồn tại trong ma trận gốc
+                    if (initial_matrix_vec[child.city_id][child.path[0]] != INF) {
                         if (actual_tour_cost < min_cost_host) {
                             min_cost_host = actual_tour_cost;
                             for(int k=0; k <= child.level; ++k) final_path_host[k] = child.path[k];
@@ -390,20 +379,7 @@ void solveTSP_cuda(const std::vector<std::vector<int>>& initial_matrix_vec) {
 }
 
 int main() {
-    // std::vector<std::vector<int>> cost_matrix = {
-    //     {INF, 10, 15, 20},
-    //     {10, INF, 35, 25},
-    //     {15, 35, INF, 30},
-    //     {20, 25, 30, INF}
-    // };
-    // std::vector<std::vector<int>> cost_matrix = { // Test case 2 (Answer: 25)
-    //     {INF, 20, 30, 10, 11},
-    //     {15, INF, 16,  4,  2},
-    //     { 3,  5, INF,  2,  4},
-    //     {19,  6, 18, INF,  3},
-    //     {16,  4,  7, 16, INF}
-    // };
-     std::vector<std::vector<int>> cost_matrix = { // Test case 3 from sequential (Answer: 242)
+     std::vector<std::vector<int>> cost_matrix = {
         {INF, 15, 18, 23, 13, 21, 17, 12, 20, 16, 24, 11, 19, 14, 22, 25, 10, 16, 18, 36},
         {15, INF, 19, 16, 22, 25, 11, 18, 24, 15, 21, 13, 17, 20, 12, 14, 23, 19, 15, 32},
         {18, 19, INF, 24, 15, 18, 23, 16, 21, 14, 22, 12, 20, 13, 17, 19, 11, 24, 16, 27},
